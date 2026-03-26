@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Mirror — что о вас знает сервер</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@300;400;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/thumbmarkjs@0.15.0/dist/thumbmark.umd.js"></script>
+<style>
+  :root {
+    --bg: #050810;
+    --surface: #0c1120;
+    --surface2: #111827;
+    --border: #1e2d45;
+    --border2: #253550;
+    --text: #e2e8f0;
+    --text2: #7a8fa8;
+    --text3: #4a5f78;
+    --accent: #00d4ff;
+    --accent2: #0099bb;
+    --green: #00ff88;
+    --yellow: #ffd600;
+    --red: #ff4466;
+    --mono: 'JetBrains Mono', monospace;
+    --display: 'Unbounded', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Noise texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Scan line effect */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 212, 255, 0.01) 2px,
+      rgba(0, 212, 255, 0.01) 4px
+    );
+    pointer-events: none;
+    z-index: 9998;
+  }
+
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px 80px;
+  }
+
+  /* Header */
+  .header {
+    padding: 60px 0 40px;
+    text-align: center;
+    position: relative;
+  }
+
+  .header-eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+    opacity: 0;
+    animation: fadeUp 0.6s 0.2s ease forwards;
+  }
+
+  .header-title {
+    font-family: var(--display);
+    font-size: clamp(28px, 6vw, 52px);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 16px;
+    opacity: 0;
+    animation: fadeUp 0.6s 0.35s ease forwards;
+  }
+
+  .header-title span {
+    color: var(--accent);
+  }
+
+  .header-sub {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text2);
+    max-width: 500px;
+    margin: 0 auto;
+    opacity: 0;
+    animation: fadeUp 0.6s 0.5s ease forwards;
+  }
+
+  .header-line {
+    width: 1px;
+    height: 40px;
+    background: linear-gradient(to bottom, var(--accent), transparent);
+    margin: 32px auto 0;
+    opacity: 0;
+    animation: fadeUp 0.6s 0.65s ease forwards;
+  }
+
+  /* Blocks */
+  .block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: border-color 0.3s;
+  }
+
+  .block:hover {
+    border-color: var(--border2);
+  }
+
+  .block.visible {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.5s ease, transform 0.5s ease, border-color 0.3s;
+  }
+
+  .block-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .block-header:hover {
+    background: #141f30;
+  }
+
+  .block-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    opacity: 0.7;
+    min-width: 28px;
+  }
+
+  .block-title {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text);
+    flex: 1;
+  }
+
+  .block-toggle {
+    color: var(--text3);
+    font-size: 10px;
+    transition: transform 0.2s;
+  }
+
+  .block-header.collapsed .block-toggle {
+    transform: rotate(-90deg);
+  }
+
+  .block-body {
+    padding: 20px;
+  }
+
+  .block-body.collapsed {
+    display: none;
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    display: inline-block;
+    width: 140px;
+    height: 13px;
+    background: linear-gradient(90deg, var(--surface2) 25%, var(--border) 50%, var(--surface2) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 2px;
+    vertical-align: middle;
+  }
+
+  .skeleton.w-sm { width: 80px; }
+  .skeleton.w-lg { width: 200px; }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Row layout */
+  .row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(30, 45, 69, 0.5);
+  }
+
+  .row:last-child { border-bottom: none; }
+
+  .row-label {
+    color: var(--text3);
+    min-width: 200px;
+    flex-shrink: 0;
+    font-size: 11px;
+    padding-top: 1px;
+  }
+
+  .row-value {
+    color: var(--text);
+    word-break: break-all;
+    flex: 1;
+  }
+
+  .row-hint {
+    color: var(--text2);
+    font-size: 11px;
+    margin-top: 3px;
+  }
+
+  .row-col {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+
+  /* Copyable value */
+  .copyable {
+    cursor: pointer;
+    transition: color 0.15s;
+    position: relative;
+  }
+
+  .copyable:hover {
+    color: var(--accent);
+  }
+
+  .copyable::after {
+    content: '⎘';
+    margin-left: 6px;
+    font-size: 10px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    color: var(--accent);
+  }
+
+  .copyable:hover::after {
+    opacity: 0.7;
+  }
+
+  .copied {
+    color: var(--green) !important;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  .badge-green { background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.2); }
+  .badge-yellow { background: rgba(255,214,0,0.1); color: var(--yellow); border: 1px solid rgba(255,214,0,0.2); }
+  .badge-red { background: rgba(255,68,102,0.1); color: var(--red); border: 1px solid rgba(255,68,102,0.2); }
+  .badge-blue { background: rgba(0,212,255,0.1); color: var(--accent); border: 1px solid rgba(0,212,255,0.2); }
+  .badge-gray { background: rgba(74,95,120,0.2); color: var(--text2); border: 1px solid rgba(74,95,120,0.3); }
+
+  /* Header table */
+  .header-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .header-table tr {
+    border-bottom: 1px solid rgba(30, 45, 69, 0.5);
+  }
+
+  .header-table tr:last-child {
+    border-bottom: none;
+  }
+
+  .header-table td {
+    padding: 8px 0;
+    vertical-align: top;
+  }
+
+  .header-table td:first-child {
+    color: var(--text3);
+    font-size: 11px;
+    padding-right: 16px;
+    min-width: 220px;
+    padding-top: 9px;
+  }
+
+  .header-table td:last-child {
+    color: var(--text);
+    word-break: break-all;
+  }
+
+  .header-name {
+    display: block;
+    color: var(--accent2);
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
+  .header-desc {
+    display: block;
+    color: var(--text3);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  /* Uniqueness meter */
+  .meter-wrap {
+    margin: 20px 0 16px;
+  }
+
+  .meter-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: var(--text2);
+  }
+
+  .meter-track {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+
+  .meter-fill {
+    height: 100%;
+    border-radius: 1px;
+    transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 0%;
+  }
+
+  .meter-fill.green { background: var(--green); box-shadow: 0 0 8px rgba(0,255,136,0.4); }
+  .meter-fill.yellow { background: var(--yellow); box-shadow: 0 0 8px rgba(255,214,0,0.4); }
+  .meter-fill.red { background: var(--red); box-shadow: 0 0 8px rgba(255,68,102,0.4); }
+
+  .uniqueness-big {
+    font-family: var(--display);
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1;
+    margin: 16px 0 8px;
+    letter-spacing: -0.02em;
+  }
+
+  .uniqueness-sub {
+    font-size: 12px;
+    color: var(--text2);
+    margin-bottom: 20px;
+  }
+
+  /* Tips */
+  .tips-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .tip {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 2px;
+  }
+
+  .tip-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    line-height: 1.4;
+  }
+
+  .tip-text {
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.5;
+  }
+
+  .tip-text strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 2px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Summary bar */
+  .summary {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--accent);
+    border-radius: 2px;
+    padding: 24px 20px;
+    margin-bottom: 16px;
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  .summary.visible {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+  }
+
+  .summary-count {
+    font-family: var(--display);
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+
+  .summary-label {
+    font-size: 11px;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: 4px;
+  }
+
+  /* Error */
+  .error-box {
+    background: rgba(255,68,102,0.08);
+    border: 1px solid rgba(255,68,102,0.3);
+    border-radius: 2px;
+    padding: 16px;
+    color: var(--red);
+    font-size: 12px;
+  }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 16px 0;
+  }
+
+  /* Animations */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Device icon */
+  .device-icon {
+    font-size: 20px;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+
+  /* Tag group */
+  .tag-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  /* Section divider inside block */
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--text3);
+    margin: 16px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Mobile */
+  @media (max-width: 600px) {
+    .row { flex-direction: column; gap: 3px; }
+    .row-label { min-width: unset; }
+    .header-table td:first-child { min-width: 100px; font-size: 10px; }
+    .summary-count { font-size: 36px; }
+    .uniqueness-big { font-size: 32px; }
+    .header-title { font-size: 26px; }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 40px 0 20px;
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-eyebrow">Диагностика приватности</div>
+    <h1 class="header-title">Privacy<span> Mirror</span></h1>
+    <p class="header-sub">Всё, что ваш браузер рассказывает серверу в момент посещения страницы</p>
+    <div class="header-line"></div>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary" id="summary">
+    <div class="summary-count" id="signal-count"><span class="skeleton w-sm"></span></div>
+    <div class="summary-label">сигналов для идентификации доступно серверу</div>
+  </div>
+
+  <!-- Block 1: Basic request info -->
+  <div class="block" id="block1">
+    <div class="block-header" onclick="toggleBlock('b1')">
+      <span class="block-num">01</span>
+      <span class="block-title">Основная информация о запросе</span>
+      <span class="block-toggle" id="b1-toggle">▼</span>
+    </div>
+    <div class="block-body" id="b1-body">
+      <div id="basic-info"><div class="row"><div class="row-label">Загрузка...</div><div class="row-value"><span class="skeleton w-lg"></span></div></div></div>
+    </div>
+  </div>
+
+  <!-- Block 2: HTTP Headers -->
+  <div class="block" id="block2">
+    <div class="block-header" onclick="toggleBlock('b2')">
+      <span class="block-num">02</span>
+      <span class="block-title">HTTP-заголовки браузера</span>
+      <span class="block-toggle" id="b2-toggle">▼</span>
+    </div>
+    <div class="block-body" id="b2-body">
+      <div id="headers-info"><div class="row"><div class="row-label">Загрузка...</div><div class="row-value"><span class="skeleton w-lg"></span></div></div></div>
+    </div>
+  </div>
+
+  <!-- Block 3: Client Fingerprint -->
+  <div class="block" id="block3">
+    <div class="block-header" onclick="toggleBlock('b3')">
+      <span class="block-num">03</span>
+      <span class="block-title">Клиентский отпечаток браузера</span>
+      <span class="block-toggle" id="b3-toggle">▼</span>
+    </div>
+    <div class="block-body" id="b3-body">
+      <div id="fingerprint-info"><div class="row"><div class="row-label">Загрузка...</div><div class="row-value"><span class="skeleton w-lg"></span></div></div></div>
+    </div>
+  </div>
+
+  <!-- Block 4: Uniqueness -->
+  <div class="block" id="block4">
+    <div class="block-header" onclick="toggleBlock('b4')">
+      <span class="block-num">04</span>
+      <span class="block-title">Уровень уникальности</span>
+      <span class="block-toggle" id="b4-toggle">▼</span>
+    </div>
+    <div class="block-body" id="b4-body">
+      <div id="uniqueness-info"><div class="row"><div class="row-label">Вычисление...</div><div class="row-value"><span class="skeleton w-lg"></span></div></div></div>
+    </div>
+  </div>
+
+  <!-- Block 5: Recommendations -->
+  <div class="block" id="block5">
+    <div class="block-header" onclick="toggleBlock('b5')">
+      <span class="block-num">05</span>
+      <span class="block-title">Что это значит и как защититься</span>
+      <span class="block-toggle" id="b5-toggle">▼</span>
+    </div>
+    <div class="block-body" id="b5-body">
+      <div id="tips-info"><span class="skeleton w-lg"></span></div>
+    </div>
+  </div>
+
+  <div class="footer">Privacy Mirror — никакие данные не сохраняются и не передаются третьим лицам</div>
+</div>
+
+<script>
+// ─── Utilities ───────────────────────────────────────────────────────────────
+
+function getKey() {
+  return new URLSearchParams(window.location.search).get('key') || '';
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function copyValue(el, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    el.classList.add('copied');
+    setTimeout(() => el.classList.remove('copied'), 1500);
+  });
+}
+
+function makeCopyable(text) {
+  if (!text || text === '—') return '<span class="row-value">—</span>';
+  const safe = escHtml(text);
+  return `<span class="row-value copyable" onclick="copyValue(this,'${escHtml(text)}')">${safe}</span>`;
+}
+
+function toggleBlock(id) {
+  const body = document.getElementById(id + '-body');
+  const toggle = document.getElementById(id + '-toggle');
+  const header = body.previousElementSibling;
+  if (body.classList.contains('collapsed')) {
+    body.classList.remove('collapsed');
+    header.classList.remove('collapsed');
+  } else {
+    body.classList.add('collapsed');
+    header.classList.add('collapsed');
+  }
+}
+
+// Animate blocks in
+function animateBlocks() {
+  const els = document.querySelectorAll('.block, .summary');
+  els.forEach((el, i) => {
+    setTimeout(() => el.classList.add('visible'), 100 + i * 80);
+  });
+}
+
+// ─── Simple hash (FNV-1a 32bit) ──────────────────────────────────────────────
+function fnv32a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+// ─── Canvas fingerprint ───────────────────────────────────────────────────────
+function canvasFingerprint() {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 200; c.height = 50;
+    const ctx = c.getContext('2d');
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#f60';
+    ctx.fillRect(125, 1, 62, 20);
+    ctx.fillStyle = '#069';
+    ctx.fillText('Privacy Mirror 🔐', 2, 15);
+    ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+    ctx.fillText('Privacy Mirror 🔐', 4, 17);
+    return fnv32a(c.toDataURL());
+  } catch (e) { return 'blocked'; }
+}
+
+// ─── WebGL fingerprint ────────────────────────────────────────────────────────
+function webglFingerprint() {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (!gl) return { vendor: 'не поддерживается', renderer: 'не поддерживается' };
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      vendor: ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+      renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+    };
+  } catch (e) { return { vendor: 'ошибка', renderer: 'ошибка' }; }
+}
+
+// ─── AudioContext fingerprint ─────────────────────────────────────────────────
+async function audioFingerprint() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return 'не поддерживается';
+    const ctx = new AudioCtx();
+    const oscillator = ctx.createOscillator();
+    const analyser = ctx.createAnalyser();
+    const gain = ctx.createGain();
+    const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
+    gain.gain.value = 0;
+    oscillator.type = 'triangle';
+    oscillator.frequency.value = 10000;
+    oscillator.connect(analyser);
+    analyser.connect(scriptProcessor);
+    scriptProcessor.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(0);
+    const freq = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(freq);
+    oscillator.stop();
+    ctx.close();
+    return fnv32a(freq.slice(0, 30).join(','));
+  } catch (e) { return 'заблокировано'; }
+}
+
+// ─── Entropy-based uniqueness estimate ───────────────────────────────────────
+// Based on EFF Panopticlick research on information entropy bits per attribute
+function estimateUniqueness(fp, serverData) {
+  const scores = {
+    userAgent:     !serverData?.headers?.['user-agent'] ? 0 : 10.5,
+    language:      !serverData?.headers?.['accept-language'] ? 0 : 6.1,
+    screenRes:     (fp.screen !== `${screen.width}x${screen.height}`) ? 0 : 4.8,
+    timezone:      (Intl.DateTimeFormat().resolvedOptions().timeZone === 'UTC') ? 1.0 : 3.5,
+    canvas:        (fp.canvas === 'blocked') ? 0 : 8.1,
+    webgl:         (fp.webgl?.vendor === 'не поддерживается') ? 0 : 5.6,
+    platform:      !serverData?.headers?.['sec-ch-ua-platform'] ? 0 : 3.2,
+    cores:         navigator.hardwareConcurrency > 0 ? 2.1 : 0,
+    touchSupport:  1.2,
+    audio:         (fp.audio === 'заблокировано' || fp.audio === 'не поддерживается') ? 0 : 6.8,
+    dpr:           window.devicePixelRatio !== 1 ? 2.4 : 0.8,
+    fonts:         1.5,
+    clientHints:   (serverData?.headers?.['sec-ch-ua']) ? 4.2 : 0,
+    dntHeader:     serverData?.headers?.['dnt'] ? 1.0 : 0,
+    protocol:      serverData?.tlsVersion ? 0.8 : 0,
+  };
+  const totalBits = Object.values(scores).reduce((a, b) => a + b, 0);
+  // Max realistic bits ~60; map to 0–100%
+  const pct = Math.min(Math.round((totalBits / 58) * 100), 99);
+  const signalsUsed = Object.values(scores).filter(v => v > 0).length;
+  // "1 in N browsers" estimate from bits
+  const oneIn = Math.round(Math.pow(2, totalBits * 0.85));
+  return { pct, totalBits: totalBits.toFixed(1), signalsUsed, oneIn };
+}
+
+// ─── Parse User-Agent ─────────────────────────────────────────────────────────
+function parseUA(ua) {
+  if (!ua) return 'не определён';
+  let browser = '', os = '';
+  // Browser
+  if (/Edg\//.test(ua)) browser = 'Microsoft Edge ' + (ua.match(/Edg\/([\d.]+)/)?.[1] || '');
+  else if (/OPR\/|Opera/.test(ua)) browser = 'Opera ' + (ua.match(/OPR\/([\d.]+)/)?.[1] || '');
+  else if (/YaBrowser/.test(ua)) browser = 'Яндекс Браузер ' + (ua.match(/YaBrowser\/([\d.]+)/)?.[1] || '');
+  else if (/Firefox\//.test(ua)) browser = 'Firefox ' + (ua.match(/Firefox\/([\d.]+)/)?.[1] || '');
+  else if (/Chrome\//.test(ua)) browser = 'Chrome ' + (ua.match(/Chrome\/([\d.]+)/)?.[1] || '');
+  else if (/Safari\//.test(ua)) browser = 'Safari ' + (ua.match(/Version\/([\d.]+)/)?.[1] || '');
+  else browser = 'неизвестный браузер';
+  // OS
+  if (/Windows NT 10\.0/.test(ua)) os = 'Windows 10/11';
+  else if (/Windows NT 6\.1/.test(ua)) os = 'Windows 7';
+  else if (/Windows/.test(ua)) os = 'Windows';
+  else if (/Mac OS X ([\d_]+)/.test(ua)) os = 'macOS ' + (ua.match(/Mac OS X ([\d_]+)/)?.[1]?.replace(/_/g, '.') || '');
+  else if (/Android ([\d.]+)/.test(ua)) os = 'Android ' + (ua.match(/Android ([\d.]+)/)?.[1] || '');
+  else if (/iPhone OS ([\d_]+)/.test(ua)) os = 'iOS ' + (ua.match(/iPhone OS ([\d_]+)/)?.[1]?.replace(/_/g, '.') || '');
+  else if (/Linux/.test(ua)) os = 'Linux';
+  else os = 'неизвестная ОС';
+  return `${browser} / ${os}`;
+}
+
+// ─── Render helpers ───────────────────────────────────────────────────────────
+function row(label, value, hint = '') {
+  const val = (value == null || value === '' || value === 'null') ? '—' : value;
+  return `<div class="row">
+    <span class="row-label">${escHtml(label)}</span>
+    <div class="row-col">
+      ${makeCopyable(String(val))}
+      ${hint ? `<span class="row-hint">${hint}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+function badge(text, type = 'blue') {
+  return `<span class="badge badge-${type}">${escHtml(text)}</span>`;
+}
+
+function deviceIcon(type) {
+  const icons = { mobile: '📱', tablet: '📲', desktop: '🖥️' };
+  return icons[type] || '💻';
+}
+
+function formatNumber(n) {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + ' млрд';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + ' млн';
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + ' тыс';
+  return n;
+}
+
+// ─── Header metadata ──────────────────────────────────────────────────────────
+const HEADER_META = {
+  'user-agent': { name: 'User-Agent', desc: 'Сообщает браузер, версию и операционную систему. Один из главных идентификаторов.' },
+  'accept': { name: 'Accept', desc: 'Какие типы контента поддерживает браузер.' },
+  'accept-language': { name: 'Accept-Language', desc: 'Язык и региональные настройки браузера — помогает определить страну.' },
+  'accept-encoding': { name: 'Accept-Encoding', desc: 'Поддерживаемые алгоритмы сжатия. Участвует в fingerprint.' },
+  'referer': { name: 'Referer', desc: 'Страница, с которой вы перешли. Раскрывает историю навигации.' },
+  'dnt': { name: 'DNT (Do Not Track)', desc: 'Запрос не отслеживать. Большинство сайтов его игнорируют — и он сам стал маркером.' },
+  'sec-gpc': { name: 'Sec-GPC', desc: 'Global Privacy Control — более новая версия DNT. Игнорируется большинством сайтов.' },
+  'upgrade-insecure-requests': { name: 'Upgrade-Insecure-Requests', desc: 'Браузер предпочитает HTTPS.' },
+  'sec-fetch-site': { name: 'Sec-Fetch-Site', desc: 'Происхождение запроса относительно сайта.' },
+  'sec-fetch-mode': { name: 'Sec-Fetch-Mode', desc: 'Режим запроса (navigate, cors, no-cors...).' },
+  'sec-fetch-dest': { name: 'Sec-Fetch-Dest', desc: 'Тип ожидаемого ресурса.' },
+  'sec-fetch-user': { name: 'Sec-Fetch-User', desc: 'Запрос инициирован пользователем (кликом).' },
+  'sec-ch-ua': { name: 'Sec-CH-UA', desc: 'Client Hints: точная версия браузера. Новый стандарт идентификации.' },
+  'sec-ch-ua-mobile': { name: 'Sec-CH-UA-Mobile', desc: 'Client Hints: мобильное ли устройство.' },
+  'sec-ch-ua-platform': { name: 'Sec-CH-UA-Platform', desc: 'Client Hints: операционная система.' },
+  'sec-ch-ua-arch': { name: 'Sec-CH-UA-Arch', desc: 'Client Hints: архитектура процессора (x86, arm...).' },
+  'sec-ch-ua-bitness': { name: 'Sec-CH-UA-Bitness', desc: 'Client Hints: разрядность ОС (32 или 64 бит).' },
+  'sec-ch-ua-full-version': { name: 'Sec-CH-UA-Full-Version', desc: 'Client Hints: полная версия браузера.' },
+  'sec-ch-ua-full-version-list': { name: 'Sec-CH-UA-Full-Version-List', desc: 'Client Hints: список всех компонентов браузера с версиями.' },
+  'sec-ch-ua-model': { name: 'Sec-CH-UA-Model', desc: 'Client Hints: модель устройства.' },
+  'cache-control': { name: 'Cache-Control', desc: 'Настройки кэширования браузера.' },
+  'connection': { name: 'Connection', desc: 'Тип соединения (keep-alive и т.д.).' },
+  'pragma': { name: 'Pragma', desc: 'Устаревший заголовок управления кэшем.' },
+  'x-forwarded-for': { name: 'X-Forwarded-For', desc: 'Цепочка IP-адресов через прокси/VPN.' },
+  'via': { name: 'Via', desc: 'Промежуточные прокси на пути запроса.' },
+  'te': { name: 'TE', desc: 'Поддерживаемые расширения передачи данных.' },
+  'priority': { name: 'Priority', desc: 'Приоритет HTTP-запроса.' },
+};
+
+// ─── Render Block 1 ───────────────────────────────────────────────────────────
+function renderBasicInfo(d) {
+  const deviceLabel = { mobile: 'Мобильный', tablet: 'Планшет', desktop: 'Десктоп' };
+  const countryNames = {
+    KZ: 'Казахстан', RU: 'Россия', US: 'США', DE: 'Германия', GB: 'Великобритания',
+    NL: 'Нидерланды', FR: 'Франция', UA: 'Украина', TR: 'Турция', CN: 'Китай',
+    JP: 'Япония', SE: 'Швеция', NO: 'Норвегия', FI: 'Финляндия', PL: 'Польша',
+    CZ: 'Чехия', AT: 'Австрия', CH: 'Швейцария', CA: 'Канада', AU: 'Австралия',
+  };
+  const countryDisplay = d.country
+    ? `${countryNames[d.country] || d.country} (${d.country})`
+    : '—';
+  const locationParts = [d.city, d.region].filter(Boolean).join(', ');
+
+  let html = '';
+  html += row('IP-адрес', d.ip, 'Ваш реальный IP-адрес, видимый серверу');
+  if (d.ipv6) html += row('IPv6', d.ipv6);
+  html += row('Страна', countryDisplay);
+  html += row('Город / Регион', locationParts || '—');
+  html += row('Провайдер / ASN', d.asOrganization ? `${d.asOrganization} (${d.asn || '—'})` : (d.asn || '—'), 'Интернет-провайдер или организация');
+  html += row('Часовой пояс (по IP)', d.timezone || '—');
+  html += row('Тип устройства', `${deviceIcon(d.deviceType)} ${deviceLabel[d.deviceType] || d.deviceType}`);
+  html += row('Протокол', d.protocol || '—');
+  if (d.tlsVersion) html += row('TLS', `${d.tlsVersion}${d.tlsCipher ? ' / ' + d.tlsCipher : ''}`, 'Версия шифрования соединения');
+  html += row('Время запроса (сервер)', new Date(d.serverTime).toLocaleString('ru-RU'), 'UTC-время на сервере Cloudflare');
+  html += row('Ray ID', d.rayId || '—', 'Уникальный идентификатор этого запроса в сети Cloudflare');
+  document.getElementById('basic-info').innerHTML = html;
+}
+
+// ─── Render Block 2 ───────────────────────────────────────────────────────────
+function renderHeaders(headers) {
+  if (!headers || Object.keys(headers).length === 0) {
+    document.getElementById('headers-info').innerHTML = '<div class="error-box">Заголовки не получены</div>';
+    return;
+  }
+
+  const ua = headers['user-agent'] || '';
+  const uaParsed = parseUA(ua);
+
+  let html = '';
+
+  if (ua) {
+    html += `<div class="row">
+      <span class="row-label">User-Agent</span>
+      <div class="row-col">
+        <span class="row-value copyable" onclick="copyValue(this,'${escHtml(ua)}')">${escHtml(ua)}</span>
+        <span class="row-hint">🔍 ${escHtml(uaParsed)}</span>
+        <span class="row-hint">User-Agent сообщает браузер, версию и операционную систему. Главный идентификатор.</span>
+      </div>
+    </div>`;
+  }
+
+  // Client Hints group
+  const chHeaders = ['sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform', 'sec-ch-ua-arch', 'sec-ch-ua-bitness', 'sec-ch-ua-full-version', 'sec-ch-ua-full-version-list', 'sec-ch-ua-model'];
+  const hasCH = chHeaders.some(h => headers[h]);
+
+  if (hasCH) {
+    html += `<div class="section-label">Client Hints — новый стандарт идентификации браузера</div>`;
+    for (const h of chHeaders) {
+      if (!headers[h]) continue;
+      const meta = HEADER_META[h];
+      html += `<div class="row">
+        <span class="row-label">${escHtml(meta?.name || h)}</span>
+        <div class="row-col">
+          <span class="row-value copyable" onclick="copyValue(this,'${escHtml(headers[h])}')">${escHtml(headers[h])}</span>
+          ${meta?.desc ? `<span class="row-hint">${escHtml(meta.desc)}</span>` : ''}
+        </div>
+      </div>`;
+    }
+  } else {
+    html += `<div class="row"><span class="row-label">Client Hints</span><div class="row-col"><span class="row-value">${badge('не отправляются', 'green')}</span><span class="row-hint">Браузер не передаёт Client Hints — это хорошо для приватности</span></div></div>`;
+  }
+
+  // Other headers
+  html += `<div class="section-label">Прочие заголовки</div>`;
+  const otherHeaders = ['accept-language', 'accept-encoding', 'referer', 'dnt', 'sec-gpc',
+    'upgrade-insecure-requests', 'sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user',
+    'cache-control', 'connection', 'x-forwarded-for', 'via', 'te', 'priority'];
+
+  for (const h of otherHeaders) {
+    if (!headers[h]) continue;
+    const meta = HEADER_META[h];
+    let displayVal = headers[h];
+    // Special highlight for DNT/GPC
+    if ((h === 'dnt' || h === 'sec-gpc') && headers[h] === '1') {
+      displayVal = `${headers[h]} (включён)`;
+    }
+    html += `<div class="row">
+      <span class="row-label">${escHtml(meta?.name || h)}</span>
+      <div class="row-col">
+        <span class="row-value copyable" onclick="copyValue(this,'${escHtml(headers[h])}')">${escHtml(displayVal)}</span>
+        ${meta?.desc ? `<span class="row-hint">${escHtml(meta.desc)}</span>` : ''}
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('headers-info').innerHTML = html;
+}
+
+// ─── Render Block 3 ───────────────────────────────────────────────────────────
+function renderFingerprint(fp, serverTZ) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tzMatch = serverTZ && tz === serverTZ;
+
+  let html = '';
+  html += row('Разрешение экрана', `${screen.width}×${screen.height}`, `Логическое разрешение в CSS-пикселях`);
+  html += row('Пиксельная плотность (DPR)', window.devicePixelRatio, 'devicePixelRatio — соотношение физических и CSS-пикселей. На Retina = 2');
+  html += row('Глубина цвета', `${screen.colorDepth} бит`);
+  html += row('Часовой пояс (браузер)', tz, tzMatch ? '✓ Совпадает с часовым поясом по IP' : (serverTZ ? `⚠ Не совпадает с IP (${serverTZ}) — возможен VPN` : ''));
+  html += row('Язык системы', navigator.language + (navigator.languages?.length > 1 ? ` (ещё: ${navigator.languages.slice(1, 4).join(', ')})` : ''), 'Язык ОС и браузера');
+  html += row('Ядра процессора', navigator.hardwareConcurrency || '—', 'navigator.hardwareConcurrency — количество логических ядер CPU');
+  html += row('Оперативная память', navigator.deviceMemory ? `≥ ${navigator.deviceMemory} ГБ` : '—', 'Приблизительный объём RAM (округлено для защиты от fingerprint)');
+  html += row('Touch-экран', navigator.maxTouchPoints > 0 ? `Да (${navigator.maxTouchPoints} точек)` : 'Нет');
+  html += row('Платформа (JS)', navigator.platform || '—', 'navigator.platform — может отличаться от реального устройства');
+  html += row('Do Not Track (JS)', navigator.doNotTrack === '1' ? 'Включён' : (navigator.doNotTrack === '0' ? 'Выключен' : 'Не задан'));
+  html += row('Cookie разрешены', navigator.cookieEnabled ? 'Да' : 'Нет');
+  html += row('PDF viewer', navigator.pdfViewerEnabled ? 'Встроен в браузер' : 'Нет');
+
+  html += `<div class="section-label">Графические и аудио отпечатки</div>`;
+  html += row('WebGL Вендор', fp.webgl?.vendor || '—', 'Производитель GPU или драйвера');
+  html += row('WebGL Рендерер', fp.webgl?.renderer || '—', 'Модель GPU. Уникальный идентификатор железа.');
+  html += row('Canvas fingerprint', fp.canvas || '—', 'Хэш уникального рендеринга текста/графики. Зависит от GPU, шрифтов и ОС.');
+  html += row('Audio fingerprint', fp.audio || '—', 'Хэш обработки звука через AudioContext. Зависит от аудиодрайвера.');
+
+  if (fp.thumbmark) {
+    html += `<div class="section-label">Общий отпечаток (ThumbmarkJS)</div>`;
+    html += row('Fingerprint ID', fp.thumbmark.substring(0, 16) + '...', 'Комбинированный хэш из всех параметров браузера');
+  }
+
+  document.getElementById('fingerprint-info').innerHTML = html;
+}
+
+// ─── Render Block 4 ───────────────────────────────────────────────────────────
+function renderUniqueness(data) {
+  const { pct, totalBits, signalsUsed, oneIn } = data;
+  let color, label, meterClass, badgeType;
+  if (pct < 40) {
+    color = 'var(--green)'; label = 'Распространённый браузер'; meterClass = 'green'; badgeType = 'green';
+  } else if (pct < 70) {
+    color = 'var(--yellow)'; label = 'Умеренно уникальный браузер'; meterClass = 'yellow'; badgeType = 'yellow';
+  } else {
+    color = 'var(--red)'; label = 'Высокоуникальный браузер'; meterClass = 'red'; badgeType = 'red';
+  }
+
+  const html = `
+    <div class="uniqueness-big" style="color:${color}">${pct}%</div>
+    <div class="uniqueness-sub">${badge(label, badgeType)}</div>
+    <div class="meter-wrap">
+      <div class="meter-label">
+        <span>Минимальная уникальность</span>
+        <span>Максимальная</span>
+      </div>
+      <div class="meter-track">
+        <div class="meter-fill ${meterClass}" id="meter-fill" style="width:0%"></div>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      ${row('Информационная энтропия', `${totalBits} бит`, 'Чем больше бит — тем уникальнее браузер. Исследование EFF: средний браузер ~18 бит.')}
+      ${row('Оценка «1 из N»', `примерно 1 из ${formatNumber(oneIn)}`, 'Сколько браузеров нужно перебрать, чтобы найти такой же. Эвристическая оценка.')}
+      ${row('Сигналов использовано', signalsUsed, 'Количество параметров с ненулевой информационной ценностью.')}
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:var(--text3);line-height:1.5;">
+      ⚠ Оценка приблизительная, основана на публичных исследованиях EFF Panopticlick и Cover Your Tracks. Реальная уникальность может отличаться.
+    </div>
+  `;
+  document.getElementById('uniqueness-info').innerHTML = html;
+  // Animate meter
+  setTimeout(() => {
+    const fill = document.getElementById('meter-fill');
+    if (fill) fill.style.width = pct + '%';
+  }, 300);
+}
+
+// ─── Render Block 5 ───────────────────────────────────────────────────────────
+function renderTips(signalCount) {
+  const html = `
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text2);line-height:1.6;">
+      Суммарно сервер может использовать более <strong style="color:var(--text)">${signalCount}</strong> сигналов для вашей идентификации — без единого файла cookie.
+    </div>
+    <div class="tips-list">
+      <div class="tip">
+        <div class="tip-icon">🌐</div>
+        <div class="tip-text">
+          <strong>Tor Browser</strong>
+          Специально настроен против fingerprinting: все пользователи выглядят одинаково. Замедляет соединение, но обеспечивает максимальную анонимность.
+        </div>
+      </div>
+      <div class="tip">
+        <div class="tip-icon">🦊</div>
+        <div class="tip-text">
+          <strong>Firefox + arkenfox или Mullvad Browser</strong>
+          Предустановленные настройки против трекинга. Блокирует Client Hints, Canvas и WebGL fingerprint.
+        </div>
+      </div>
+      <div class="tip">
+        <div class="tip-icon">🚫</div>
+        <div class="tip-text">
+          <strong>Отключить Client Hints</strong>
+          В Firefox: в about:config установить <code style="color:var(--accent)">dom.webaudio.enabled = false</code> и <code style="color:var(--accent)">privacy.resistFingerprinting = true</code>. Скроет аудио и canvas fingerprint.
+        </div>
+      </div>
+      <div class="tip">
+        <div class="tip-icon">🔒</div>
+        <div class="tip-text">
+          <strong>VPN / Proxy</strong>
+          Скрывает реальный IP и местоположение, но не browser fingerprint. Сервер всё равно видит ваш браузер, ОС, экран и GPU.
+        </div>
+      </div>
+      <div class="tip">
+        <div class="tip-icon">📴</div>
+        <div class="tip-text">
+          <strong>Отключить JavaScript (крайняя мера)</strong>
+          Полностью блокирует client-side fingerprinting. Большинство сайтов перестанет работать, но приватность — максимальная.
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('tips-info').innerHTML = html;
+}
+
+// ─── Signal counter ───────────────────────────────────────────────────────────
+function countSignals(serverData, fp) {
+  let count = 0;
+  if (serverData) {
+    if (serverData.ip) count++;
+    if (serverData.country) count++;
+    if (serverData.city) count++;
+    if (serverData.asOrganization) count++;
+    if (serverData.timezone) count++;
+    if (serverData.rayId) count++;
+    if (serverData.tlsVersion) count++;
+    if (serverData.deviceType) count++;
+    count += Object.keys(serverData.headers || {}).length;
+  }
+  // Client-side signals
+  count += 12; // screen, dpr, tz, lang, cores, ram, touch, platform, dnt, cookies, canvas, webgl
+  if (fp?.audio && fp.audio !== 'заблокировано') count++;
+  if (fp?.thumbmark) count++;
+  return count;
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+async function main() {
+  animateBlocks();
+
+  const key = getKey();
+
+  // Parallel: server data + client fingerprint
+  const [serverResult, canvasHash, webgl, audioHash, thumbmark] = await Promise.all([
+    fetch(`/api/info?key=${encodeURIComponent(key)}`)
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .catch(err => ({ _error: err })),
+    Promise.resolve(canvasFingerprint()),
+    Promise.resolve(webglFingerprint()),
+    audioFingerprint(),
+    (typeof ThumbmarkJS !== 'undefined')
+      ? ThumbmarkJS.getFingerprint().catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  const fp = {
+    canvas: canvasHash,
+    webgl: webgl,
+    audio: audioHash,
+    screen: `${screen.width}x${screen.height}`,
+    thumbmark: thumbmark,
+  };
+
+  // Render blocks
+  if (serverResult._error) {
+    const isAuth = serverResult._error === 403;
+    document.getElementById('basic-info').innerHTML =
+      `<div class="error-box">${isAuth ? '🔐 Доступ запрещён — неверный ключ в URL (?key=...)' : '⚠ Не удалось получить данные с сервера'}</div>`;
+    document.getElementById('headers-info').innerHTML = '<div class="error-box">Данные недоступны</div>';
+  } else {
+    renderBasicInfo(serverResult);
+    renderHeaders(serverResult.headers || {});
+  }
+
+  renderFingerprint(fp, serverResult?.timezone);
+
+  const uniqData = estimateUniqueness(fp, serverResult._error ? null : serverResult);
+  renderUniqueness(uniqData);
+
+  const totalSignals = countSignals(serverResult._error ? null : serverResult, fp);
+  renderTips(totalSignals);
+
+  // Update summary
+  document.getElementById('signal-count').textContent = totalSignals + '+';
+}
+
+main();
+</script>
+</body>
+</html>
